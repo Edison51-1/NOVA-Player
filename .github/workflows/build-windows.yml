@@ -1,3 +1,4 @@
+
 name: Build NOVA Player for Windows
 
 on:
@@ -9,6 +10,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -22,30 +24,71 @@ jobs:
       - name: Install VLC
         shell: pwsh
         run: |
-          $installer = "$env:TEMP\vlc-win64.exe"
-          Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.exe" -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
-          if (!(Test-Path "$env:ProgramFiles\VideoLAN\VLC\libvlc.dll")) {
+          choco install vlc --yes --no-progress
+
+          $vlc = "$env:ProgramFiles\VideoLAN\VLC"
+
+          if (!(Test-Path "$vlc\libvlc.dll")) {
             throw "libVLC installation was not found."
           }
 
+          if (!(Test-Path "$vlc\libvlccore.dll")) {
+            throw "libvlccore.dll was not found."
+          }
+
       - name: Install Python dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
 
       - name: Build application
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --name NOVAPlayer --onedir main.py
+
+          if (!(Test-Path "dist\NOVAPlayer\NOVAPlayer.exe")) {
+            throw "NOVAPlayer.exe was not generated."
+          }
+
           $vlc = "$env:ProgramFiles\VideoLAN\VLC"
           $target = "dist\NOVAPlayer\vlc"
+
           New-Item -ItemType Directory -Force -Path $target | Out-Null
+
           Copy-Item "$vlc\libvlc.dll" $target -Force
           Copy-Item "$vlc\libvlccore.dll" $target -Force
-          if (Test-Path "$vlc\plugins") { Copy-Item "$vlc\plugins" "$target\plugins" -Recurse -Force }
-          Get-ChildItem "$vlc\*.dll" | ForEach-Object { Copy-Item $_.FullName "dist\NOVAPlayer" -Force }
-          Compress-Archive -Path "dist\NOVAPlayer\*" -DestinationPath "dist\NOVAPlayer-Windows-x64.zip" -Force
+
+          if (!(Test-Path "$vlc\plugins")) {
+            throw "VLC plugins directory was not found."
+          }
+
+          Copy-Item "$vlc\plugins" "$target\plugins" -Recurse -Force
+
+          Get-ChildItem "$vlc\*.dll" -File |
+            ForEach-Object {
+              Copy-Item $_.FullName "dist\NOVAPlayer" -Force
+            }
+
+          Compress-Archive `
+            -Path "dist\NOVAPlayer\*" `
+            -DestinationPath "dist\NOVAPlayer-Windows-x64.zip" `
+            -Force
+
+      - name: Verify build files
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist\NOVAPlayer-Windows-x64.zip")) {
+            throw "Windows ZIP archive was not generated."
+          }
+
+          if (!(Test-Path "dist\NOVAPlayer\NOVAPlayer.exe")) {
+            throw "NOVAPlayer.exe is missing."
+          }
+
+          Get-Item "dist\NOVAPlayer-Windows-x64.zip"
+          Get-Item "dist\NOVAPlayer\NOVAPlayer.exe"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4

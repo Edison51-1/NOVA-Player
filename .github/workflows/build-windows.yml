@@ -29,7 +29,7 @@ jobs:
           $vlc = "$env:ProgramFiles\VideoLAN\VLC"
 
           if (!(Test-Path "$vlc\libvlc.dll")) {
-            throw "libVLC installation was not found."
+            throw "libvlc.dll was not found."
           }
 
           if (!(Test-Path "$vlc\libvlccore.dll")) {
@@ -52,18 +52,8 @@ jobs:
         run: |
           python -c "import PySide6; print('PySide6:', PySide6.__version__)"
           python -c "import PyInstaller; print('PyInstaller:', PyInstaller.__version__)"
-
-          $pyside = python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))"
-
-          Write-Host "PySide6 directory: $pyside"
-
-          $icu = Get-ChildItem $pyside -Recurse -File -Filter "icuuc*.dll"
-
-          if (!$icu) {
-            throw "icuuc.dll is missing from the installed PySide6 package."
-          }
-
-          $icu | ForEach-Object { Write-Host $_.FullName }
+          python -c "from PySide6.QtCore import QLibraryInfo; print('Qt plugins:', QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))"
+          python -c "from PySide6.QtCore import QLibraryInfo; print('Qt libraries:', QLibraryInfo.path(QLibraryInfo.LibraryPath.LibrariesPath))"
 
       - name: Build application
         shell: pwsh
@@ -78,43 +68,12 @@ jobs:
             --collect-all shiboken6 `
             main.py
 
-          $app = "dist\NOVAPlayer"
-          $internal = "$app\_internal"
-          $qt = "$internal\PySide6"
-
-          if (!(Test-Path "$app\NOVAPlayer.exe")) {
-            throw "NOVAPlayer.exe was not generated."
+          if (!(Test-Path "dist\NOVAPlayer\NOVAPlayer.exe")) {
+            throw "NOVAPlayer.exe was not generated. Check the PyInstaller logs."
           }
-
-          $qtCore = Get-ChildItem $internal -Recurse -File -Filter "Qt6Core.dll"
-          $icu = Get-ChildItem $internal -Recurse -File -Filter "icuuc*.dll"
-          $qtPython = Get-ChildItem $internal -Recurse -File -Filter "QtCore.pyd"
-          $qwindows = Get-ChildItem $internal -Recurse -File -Filter "qwindows.dll"
-
-          if (!$qtCore) {
-            throw "Qt6Core.dll is missing from the build."
-          }
-
-          if (!$icu) {
-            throw "icuuc.dll is missing from the build."
-          }
-
-          if (!$qtPython) {
-            throw "QtCore.pyd is missing from the build."
-          }
-
-          if (!$qwindows) {
-            throw "qwindows.dll is missing from the build."
-          }
-
-          Write-Host "Qt and ICU files found:"
-          $qtCore | ForEach-Object { Write-Host $_.FullName }
-          $icu | ForEach-Object { Write-Host $_.FullName }
-          $qtPython | ForEach-Object { Write-Host $_.FullName }
-          $qwindows | ForEach-Object { Write-Host $_.FullName }
 
           $vlc = "$env:ProgramFiles\VideoLAN\VLC"
-          $target = "$app\vlc"
+          $target = "dist\NOVAPlayer\vlc"
 
           New-Item -ItemType Directory -Force -Path $target | Out-Null
 
@@ -124,11 +83,11 @@ jobs:
 
           Get-ChildItem "$vlc\*.dll" -File |
             ForEach-Object {
-              Copy-Item $_.FullName $app -Force
+              Copy-Item $_.FullName "dist\NOVAPlayer" -Force
             }
 
           Compress-Archive `
-            -Path "$app\*" `
+            -Path "dist\NOVAPlayer\*" `
             -DestinationPath "dist\NOVAPlayer-Windows-x64.zip" `
             -Force
 

@@ -1,0 +1,58 @@
+name: Build NOVA Player for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: "x64"
+
+      - name: Install VLC
+        shell: pwsh
+        run: |
+          $installer = "$env:TEMP\vlc-win64.exe"
+          Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.exe" -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          if (!(Test-Path "$env:ProgramFiles\VideoLAN\VLC\libvlc.dll")) {
+            throw "libVLC installation was not found."
+          }
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build application
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --name NOVAPlayer --onedir main.py
+          $vlc = "$env:ProgramFiles\VideoLAN\VLC"
+          $target = "dist\NOVAPlayer\vlc"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$vlc\libvlc.dll" $target -Force
+          Copy-Item "$vlc\libvlccore.dll" $target -Force
+          if (Test-Path "$vlc\plugins") { Copy-Item "$vlc\plugins" "$target\plugins" -Recurse -Force }
+          Get-ChildItem "$vlc\*.dll" | ForEach-Object { Copy-Item $_.FullName "dist\NOVAPlayer" -Force }
+          Compress-Archive -Path "dist\NOVAPlayer\*" -DestinationPath "dist\NOVAPlayer-Windows-x64.zip" -Force
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVAPlayer-Windows-x64
+          path: |
+            dist/NOVAPlayer-Windows-x64.zip
+            dist/NOVAPlayer/NOVAPlayer.exe
+          if-no-files-found: error
+          retention-days: 14

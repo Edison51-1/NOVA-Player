@@ -47,13 +47,13 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      - name: Check Qt dependencies
+      - name: Check Qt installation
         shell: pwsh
         run: |
           python -c "import PySide6; print('PySide6:', PySide6.__version__)"
-          python -c "import PyInstaller; print('PyInstaller:', PyInstaller.__version__)"
-          python -c "from PySide6.QtCore import QLibraryInfo; print('Qt plugins:', QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))"
           python -c "from PySide6.QtCore import QLibraryInfo; print('Qt libraries:', QLibraryInfo.path(QLibraryInfo.LibraryPath.LibrariesPath))"
+          python -c "from PySide6.QtCore import QLibraryInfo; print('Qt plugins:', QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))"
+          python -c "import PySide6.QtCore; print('QtCore import OK')"
 
       - name: Build application
         shell: pwsh
@@ -64,12 +64,13 @@ jobs:
             --windowed `
             --name NOVAPlayer `
             --onedir `
+            --contents-directory _internal `
             --collect-all PySide6 `
             --collect-all shiboken6 `
             main.py
 
           if (!(Test-Path "dist\NOVAPlayer\NOVAPlayer.exe")) {
-            throw "NOVAPlayer.exe was not generated. Check the PyInstaller logs."
+            throw "NOVAPlayer.exe was not generated."
           }
 
           $vlc = "$env:ProgramFiles\VideoLAN\VLC"
@@ -86,31 +87,77 @@ jobs:
               Copy-Item $_.FullName "dist\NOVAPlayer" -Force
             }
 
+          if (!(Test-Path "dist\NOVAPlayer\_internal")) {
+            throw "PyInstaller dependency directory is missing."
+          }
+
+          if (!(Test-Path "dist\NOVAPlayer\_internal\python312.dll")) {
+            throw "Python runtime DLL is missing."
+          }
+
+          Get-ChildItem "dist\NOVAPlayer" -Recurse -File |
+            Select-Object -First 30 FullName
+
+      - name: Test packaged Qt dependencies
+        shell: pwsh
+        run: |
+          $internal = "dist\NOVAPlayer\_internal"
+
+          $qtCore = Get-ChildItem $internal -Filter "Qt6Core.dll" -Recurse
+          $qtPython = Get-ChildItem $internal -Filter "QtCore.pyd" -Recurse
+          $qtPlatform = Get-ChildItem $internal -Filter "qwindows.dll" -Recurse
+          $icu = Get-ChildItem $internal -Filter "icuuc*.dll" -Recurse
+
+          if (!$qtCore) {
+            throw "Qt6Core.dll is missing from the packaged application."
+          }
+
+          if (!$qtPython) {
+            throw "QtCore.pyd is missing from the packaged application."
+          }
+
+          if (!$qtPlatform) {
+            throw "The Qt Windows platform plugin is missing."
+          }
+
+          if (!$icu) {
+            Write-Warning "No ICU DLL found in the packaged files. Verify Qt runtime dependencies."
+          }
+
+          Write-Host "Qt dependency checks completed."
+
+      - name: Create Windows ZIP
+        shell: pwsh
+        run: |
           Compress-Archive `
-            -Path "dist\NOVAPlayer\*" `
+            -Path "dist\NOVAPlayer" `
             -DestinationPath "dist\NOVAPlayer-Windows-x64.zip" `
             -Force
 
-      - name: Verify build files
-        shell: pwsh
-        run: |
           if (!(Test-Path "dist\NOVAPlayer-Windows-x64.zip")) {
             throw "Windows ZIP archive was not generated."
           }
 
-          if (!(Test-Path "dist\NOVAPlayer\NOVAPlayer.exe")) {
-            throw "NOVAPlayer.exe is missing."
+      - name: Verify ZIP contents
+        shell: pwsh
+        run: |
+          $zip = "dist\NOVAPlayer-Windows-x64.zip"
+          $entries = tar -tf $zip
+
+          $entries | Select-Object -First 40
+
+          if (!($entries -match "NOVAPlayer/NOVAPlayer.exe")) {
+            throw "NOVAPlayer.exe is missing from the ZIP."
           }
 
-          Get-Item "dist\NOVAPlayer-Windows-x64.zip"
-          Get-Item "dist\NOVAPlayer\NOVAPlayer.exe"
+          if (!($entries -match "python312.dll")) {
+            throw "Python DLL is missing from the ZIP."
+          }
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: NOVAPlayer-Windows-x64
-          path: |
-            dist/NOVAPlayer-Windows-x64.zip
-            dist/NOVAPlayer/NOVAPlayer.exe
+          path: dist/NOVAPlayer-Windows-x64.zip
           if-no-files-found: error
           retention-days: 14

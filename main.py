@@ -16,6 +16,16 @@ from library import ALL_EXT, AUDIO_EXT, VIDEO_EXT, Library, MetaProbe, fmt_time
 from style import QSS
 
 VERSION = "1.0"
+_LOG = None
+
+
+def log(msg):
+    """Ajoute une ligne au journal ~/NOVA-Player-log.txt (si disponible)."""
+    if _LOG:
+        try:
+            _LOG.write(msg + "\n")
+        except Exception:
+            pass
 
 
 def mk_btn(name, obj, size, icon_size, tip="", color="#ffffff"):
@@ -542,7 +552,9 @@ class MainWindow(QMainWindow):
             else:
                 self.stop()
 
-    def on_error(self, _err, msg):
+    def on_error(self, err, msg):
+        log(f"Erreur média : {err} | {msg} | fichier : {self.current} | "
+            f"backend : {os.environ.get('QT_MEDIA_BACKEND', 'par défaut')}")
         self.stack.setCurrentIndex(1)
         self.audio_title.setText("Lecture impossible")
         self.audio_hint.setText(msg or "Format non pris en charge")
@@ -602,13 +614,42 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
+def _setup_crash_log():
+    """Écrit les erreurs dans ~/NOVA-Player-log.txt (utile quand l'appli est lancée sans console)."""
+    import faulthandler
+    import traceback
+    global _LOG
+    log_path = Path.home() / "NOVA-Player-log.txt"
+    try:
+        f = open(log_path, "a", encoding="utf-8", buffering=1)
+        _LOG = f
+        f.write(f"\n--- Démarrage NOVA Player {VERSION} | Python {sys.version.split()[0]} | {sys.platform} ---\n")
+        faulthandler.enable(file=f, all_threads=True)
+    except Exception:
+        return log_path
+
+    def hook(etype, value, tb):
+        text = "".join(traceback.format_exception(etype, value, tb))
+        try:
+            f.write(text)
+            QMessageBox.critical(None, "NOVA Player - erreur", f"{text[-1200:]}\n\nJournal : {log_path}")
+        except Exception:
+            pass
+    sys.excepthook = hook
+    return log_path
+
+
 def main():
+    _setup_crash_log()
     app = QApplication(sys.argv)
     app.setApplicationName("NOVA Player")
     app.setOrganizationName("NovaPlayer")
     app.setStyleSheet(QSS)
     win = MainWindow()
+    log(f"Fenêtre créée | backend : {os.environ.get('QT_MEDIA_BACKEND', 'par défaut')}")
     win.show()
+    win.raise_()
+    win.activateWindow()
     args = [a for a in sys.argv[1:] if Path(a).exists()]
     if args:  # « Ouvrir avec NOVA Player »
         win.import_paths(args, autoplay=True)

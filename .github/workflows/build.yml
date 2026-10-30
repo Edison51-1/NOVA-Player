@@ -62,10 +62,34 @@ jobs:
             --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtPdf main.py
           tar -C dist -czf dist/NOVA-Player-Linux.tar.gz NOVA-Player
 
+      - name: Vérifier les composants multimédia (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "--- plugins multimedia ---"
+          Get-ChildItem -Recurse dist/NOVA-Player/_internal/PySide6/plugins/multimedia -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+          Write-Host "--- DLL FFmpeg ---"
+          Get-ChildItem -Recurse dist/NOVA-Player -Include av*.dll,sw*.dll -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+
+      - name: Installateur Windows (Setup.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc installer\NOVAPlayer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.archive }}
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: NOVA-Player-Setup
+          path: dist/NOVA-Player-Setup.exe
 
       - name: Publier la release (tag v*)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -73,3 +97,9 @@ jobs:
         with:
           files: ${{ matrix.archive }}
           generate_release_notes: true
+
+      - name: Publier l'installateur (tag v*)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NOVA-Player-Setup.exe
